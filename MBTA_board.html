@@ -1,0 +1,261 @@
+
+<html>
+	<head>
+		<meta charset="utf-8"/>
+		<title>MBTA Departures/Arrivals Board by Luc Vachon</title>
+		<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+		<script>
+			timeout=0;
+			preddata={};
+			first=true;
+			let prevStop='';
+			function setLastStation(){
+				if(stopsel.value!=prevStop && prevStop){localStorage.setItem("lastStation",prevStop);}
+				prevStop=stopsel.value;
+			}
+			function fetchPredictions(){
+				localStorage.setItem('line',linesel.value);
+				localStorage.setItem('stop',stopsel.value);
+
+				if(!first) {
+					localStorage.setItem('dest',destsel.value);
+				}
+				first = false;
+				const mbtakey="a5776a64cc384c219bd536a4d1246260";
+				const preURL=`https://api-v3.mbta.com/predictions?filter[route]=${linesel.value}&filter[stop]=${stopsel.value}&api_key=${mbtakey}&include=trip,vehicle`;
+				$.get(preURL,data=>{
+					preddata = data;
+					showPredictions(data);
+
+				});
+			}
+			directions=[];
+			function fetchLines(){
+				const mbtakey="a5776a64cc384c219bd536a4d1246260";
+				const preURL=`https://api-v3.mbta.com/routes?filter[type]=0,1,2&api_key=${mbtakey}`;
+				$.get(preURL,data=>{
+					linesel.innerHTML='';
+					data.data.forEach(e=>{
+						directions[e.id]=e.attributes.direction_destinations;
+						linesel.innerHTML+=`<option value="${e.id}" ${localStorage.getItem('line')==e.id ? 'selected' : ''}>${e.attributes.long_name}</option>`;
+					});
+					if(localStorage.getItem('line')){
+						fetchStops(localStorage.getItem('line'));
+					}
+				});
+			}
+			function fetchStops(line){
+				if(!first) {
+					destsel.innerHTML=`<option value="All">All</option>`;
+				}
+
+				const mbtakey="a5776a64cc384c219bd536a4d1246260";
+				const preURL=`https://api-v3.mbta.com/stops?filter[route]=${line}&api_key=${mbtakey}`;
+				$.get(preURL,data=>{
+					stopsel.innerHTML='';
+					data.data.forEach(e=>{
+						stopsel.innerHTML+=`<option value="${e.id}" ${localStorage.getItem('stop')==e.id ? 'selected' : ''}>${e.attributes.name}</option>`;
+					});
+					if(localStorage.getItem('stop')){
+						fetchPredictions();
+					}
+				});
+			}
+
+			function headsign(id){
+				let hs = "";
+				preddata.included.forEach(e=>{
+					if(e.id===id){hs=e.attributes.headsign;return;}
+				});
+				return hs;
+			}
+			function showPredictions(data){
+				data.data.sort((a,b)=>{
+					if(a.attributes.departure_time > b.attributes.departure_time){
+						return 1
+					}else{
+						if(a.attributes.departure_time < b.attributes.departure_time){return -1;}
+						else{
+							if(a.attributes.arrival_time < b.attributes.arrival_time){return -1;}
+							else{return 1;}
+						}
+					}
+				});
+				
+				let dHTML='<table><tr><th width="10%">Time</th><th width="20%">Destination</th><th width="40%" class="status">Status</th><th width="10%" class="track">Track</th><th width="20%" class="vehicle">Car</th></tr>';
+				let aHTML = dHTML;
+				destsel.innerHTML='';
+				destsel.innerHTML+=`<option value="All">All</option>`;
+				let destinations = [];
+				data.data.forEach((e,index)=>{
+					if (!destinations.includes(headsign(e.relationships.trip.data.id))) {
+						destinations.push(headsign(e.relationships.trip.data.id));
+					}
+					if("All" === localStorage.getItem('dest') || headsign(e.relationships.trip.data.id) === localStorage.getItem('dest')) {
+						if(e.attributes.departure_time){
+							const dat = new Date(e.attributes.departure_time);
+							const timeStr = (dat.getHours()>12 ? dat.getHours()%12 : dat.getHours()) + ":" + (dat.getMinutes()>9 ? dat.getMinutes() : '0'+dat.getMinutes());
+							dHTML+= `<tr>
+								<td class='depTime'>${timeStr}</td>
+								<td>${headsign(e.relationships.trip.data.id)}</td>
+								<td class='status ${e.attributes.status ? e.attributes.status.replace(" ","_"): null}'>${e.attributes.status ? e.attributes.status : minsaway(dat)}</td>`;
+
+							if(e.attributes.track){
+								dHTML+=`<td class='track'>${e.attributes.track}</td>`;
+							}else{
+								dHTML+=`<td class='track'>TBD</td>`;
+							}
+							if(e.relationships && e.relationships.vehicle && e.relationships.vehicle.data){
+								dHTML+=`<td class='vehicle'>${e.relationships.vehicle.data.id}</td>`;
+							}else{
+								dHTML+="<td class='vehicle'>?</td>";
+							}
+							dHTML+='</tr>';
+							if(e.attributes.status==="Now boarding"){
+								window.navigator.vibrate(200);
+							}
+							if(e.attributes.status==="All aboard"){
+								window.navigator.vibrate(1000);
+							}
+						}
+						if(e.attributes.arrival_time){
+							const dat = new Date(e.attributes.arrival_time);
+							const timeStr = (dat.getHours()>12 ? dat.getHours()%12 : dat.getHours()) + ":" + (dat.getMinutes()>9 ? dat.getMinutes() : '0'+dat.getMinutes());
+							aHTML+= `<tr>
+								<td class='depTime'>${timeStr}</td>
+								<td>${directions[e.relationships.route.data.id][e.attributes.direction_id]}</td>
+								<td class='status ${e.attributes.status ? e.attributes.status.replace(" ","_"): null}'>${e.attributes.status ? e.attributes.status : minsaway(dat)}</td>`;
+							if(e.attributes.track){
+								aHTML+=`<td class='track'>${e.attributes.track}</td>`;
+							}else{
+								aHTML+=`<td class='track'>TBD</td>`;
+							}
+							if(e.relationships && e.relationships.vehicle && e.relationships.vehicle.data){
+								aHTML+=`<td class='vehicle'>${e.relationships.vehicle.data.id}</td>`;
+							}else{
+								aHTML+="<td class='vehicle'>?</td>";
+							}
+							aHTML+='</tr>';
+							if(e.attributes.status==="Now boarding"){
+								window.navigator.vibrate(200);
+							}
+							if(e.attributes.status==="All aboard"){
+								window.navigator.vibrate(1000);
+							}
+						}
+					}
+				});
+				destinations.forEach((e) => {
+					destsel.innerHTML+=`<option value="${e}" ${localStorage.getItem('dest')==e ? 'selected' : ''}>${e}</option>`;
+				});
+				dHTML += "</table>";
+				aHTML += "</table>";
+				depDiv.innerHTML=dHTML;
+				arrDiv.innerHTML=aHTML;
+				const dat = new Date();
+				lastUp.innerHTML = 'Last updated '+dat.getHours()+":"+(dat.getMinutes() > 9 ? dat.getMinutes() : '0'+dat.getMinutes()) + ":" + (dat.getSeconds() > 9 ? dat.getSeconds() : '0'+dat.getSeconds());
+				clearTimeout(timeout);
+				timeout = setTimeout(fetchPredictions,10000);
+			}
+
+			function minsaway (time){
+				const ms = time.getTime() - Date.now();
+				return Math.ceil(ms/60000)+" mins away";
+			}
+
+			const swapStation = ()=>{
+				const curStop = stopsel.value;
+				const lastStation = localStorage.getItem('lastStation','');
+				if(lastStation.length){
+					stopsel.value = lastStation;
+					localStorage.setItem("lastStation",curStop);
+					fetchPredictions();
+				}
+			}
+			
+			function handleArrivClick(event){
+				Array.from(document.getElementsByClassName("arr")).forEach((elem)=>{
+					elem.style.display=event.target.checked?"block":"none";
+				});
+			}
+		</script>
+		<style>
+			@font-face{
+				font-family:"Electronic Highway Sign";
+				src: url("ARCADE.TTF") format("truetype");
+			}
+			body {background:#404040;color:#EEEEEE;font-family:"Electronic Highway Sign";}
+			.predDiv table{font-size: 1cm;margin-bottom:20px;}
+			.depTime {font-style: italic;}
+			.Now_boarding {color:green;}
+			.All_aboard {color:yellow;}
+			.On_time {color: white;}
+			.Late {color: orange;}
+			.Canceled {color: red;}
+			.Departed {color: red;}
+			select {font-size:1cm;}
+			th {text-align:left;font-size: 1cm;border:solid 2px #808080;padding:2px 16px 2px 16px;font-weight:normal;color:#FFFFFF;}
+			td {border:solid 1px #606060;padding:2px 16px 2px 16px;border-bottom:none;color:#CCCCCC;}
+			.toptd {border:none;font-size:1cm;}
+			.seltd select {width:100%;text-align:right}
+			.title {font-size:2cm;text-align:center;background:#101010;border: solid 1px #808080;border-bottom:none;border-radius:16px 16px 0px 0px;color:#EEEEEE}
+			.vehicle {text-align:right;}
+			.status {text-align:center;}
+			.track {text-align:right;}
+			table {width: 100%;background:#101010;border:solid 1px #808080;border-collapse:collapse;;}
+			center {margin-bottom:20px;font-family:monospace;font-size:1.5cm;}
+			.arr {display:none;}
+			.arriv {display:block;font-size:0.8cm;}
+		</style>
+
+	</head>
+	<body>
+		<center>
+			<table>
+				<tr>
+					<td class='toptd'>Line:</td>
+					<td class='seltd'>
+						<select id='linesel' onchange='fetchStops(this.value);'>
+							<option value='CR-Lowell'>Lowell</option>
+						</select>
+					</td class='seltd'>
+				</tr>
+				<tr>
+					<td class='toptd'>Stop:</td>
+					<td class='seltd' style='display:flex;flex-direction:row;'>
+						<button onclick='swapStation()' style='width:2cm;font-size:1cm;' title='swap to previous station'>🔄️</button>
+						<select id='stopsel' onchange='setLastStation();fetchPredictions();'>
+							<option value='North Station'>North Station</option>
+						</select>
+					</td>
+				</tr>
+				<tr>
+					<td class='toptd'>Destination:</td>
+					<td class='seltd'>
+						<select id='destsel' onchange='fetchPredictions();'>
+							<option value='All'>All</option>
+						</select>
+					</td>
+				</tr>
+			</table>
+			<span id='lastUp'>...</span>
+			
+		</center>
+		<div style='padding-right:20px;padding-left:20px;'>
+			<div class='title'>Departures</div>
+			<div class='predDiv' id='depDiv'>Predictions...</div>
+			<div class='title arr'>Arrivals</div>
+			<div class='predDiv arr' id='arrDiv'>Predictions...</div>
+		</div>
+		<center>
+			<div class='arriv'>
+				<label>Show Arrivals:
+					<input type='checkbox' onclick='handleArrivClick(event)'>
+				</label>
+			</div>
+		</center>
+	</body>
+	<script>
+		fetchLines();
+	</script>
+</html>
